@@ -28,9 +28,24 @@ class Agent():
             if factories_to_place > 0 and my_turn_to_place:
                 # we will spawn our factory in a random location with 150 metal and water if it is our turn to place
                 potential_spawns = np.array(list(zip(*np.where(obs["board"]["valid_spawns_mask"] == 1))))
-                spawn_loc = potential_spawns[np.random.randint(0, len(potential_spawns))]
+                spawn_loc = self._find_factory_place_with_ice(potential_spawns, game_state.board.ice)
+                # spawn_loc = potential_spawns[np.random.randint(0, len(potential_spawns))]
                 return dict(spawn=spawn_loc, metal=150, water=150)
             return dict()
+    
+    def _find_factory_place_with_ice(self, potiential_spawns, ice):
+        ice_locs = np.argwhere(ice != 0)
+        spawn_loc = potiential_spawns[0]
+        min_dist = 200
+        for ice_loc in ice_locs:
+            abs_dist = np.absolute(potiential_spawns - ice_loc)
+            dist = np.sum(abs_dist, axis=1)
+            cur_min_dist = np.min(dist)
+            if cur_min_dist < min_dist:
+                min_dist = cur_min_dist
+                spawn_loc = potiential_spawns[np.argmin(dist)]
+
+        return spawn_loc
 
     def act(self, step: int, obs, remainingOverageTime: int = 60):
         actions = dict()
