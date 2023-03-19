@@ -2,6 +2,8 @@ from lux.kit import obs_to_game_state, GameState, EnvConfig
 from lux.utils import direction_to, my_turn_to_place_factory
 import numpy as np
 import sys
+import luxai_s2.unit as luxai_unit
+
 class Agent():
     def __init__(self, player: str, env_cfg: EnvConfig) -> None:
         self.player = player
@@ -55,9 +57,17 @@ class Agent():
         game_state.teams[self.player].place_first
         factory_tiles, factory_units = [], []
         for unit_id, factory in factories.items():
+
+            # build heavy
             if factory.power >= self.env_cfg.ROBOTS["HEAVY"].POWER_COST and \
             factory.cargo.metal >= self.env_cfg.ROBOTS["HEAVY"].METAL_COST:
                 actions[unit_id] = factory.build_heavy()
+
+            # build light
+            elif factory.power >= self.env_cfg.ROBOTS["LIGHT"].POWER_COST and \
+            factory.cargo.metal >= self.env_cfg.ROBOTS["LIGHT"].METAL_COST:
+                actions[unit_id] = factory.build_light()
+
             if self.env_cfg.max_episode_length - game_state.real_env_steps < 50:
                 if factory.water_cost(game_state) <= factory.cargo.water:
                     actions[unit_id] = factory.water()
@@ -67,10 +77,10 @@ class Agent():
 
         units = game_state.units[self.player]
         ice_map = game_state.board.ice
+        rubble_map = game_state.board.rubble
         ice_tile_locations = np.argwhere(ice_map == 1)
+        rubble_tile_locations = np.argwhere(rubble_map != 1)
         for unit_id, unit in units.items():
-
-            # track the closest factory
             closest_factory = None
             adjacent_to_factory = False
             if len(factory_tiles) > 0:
@@ -79,32 +89,59 @@ class Agent():
                 closest_factory = factory_units[np.argmin(factory_distances)]
                 adjacent_to_factory = np.mean((closest_factory_tile - unit.pos) ** 2) == 0
 
-                # pickup power of factory
+                rubble_tile_distances = np.mean((rubble_tile_locations - unit.pos) ** 2, 1)
+                closest_rubble_tile = rubble_tile_locations[np.argmin(rubble_tile_distances)]
+                adjacent_to_rubble = np.mean((closest_rubble_tile - unit.pos) ** 2) == 0
+
                 factory_power = closest_factory.power
-                if adjacent_to_factory and factory_power >= 300:
-                    if factory_power >= 300:
-                        actions[unit_id] = [unit.pickup(4, factory_power, repeat=0)]
+                # for heavy robots
+                if unit.unit_type == luxai_unit.UnitType.HEAVY:
+                    # pickup power of factory
+                    if adjacent_to_factory and factory_power >= 300:
+                        if factory_power >= 300:
+                            actions[unit_id] = [unit.pickup(4, 300, repeat=0)]
+                    else:
+                        # previous ice mining code
+                        if unit.cargo.ice < 160:
+                            ice_tile_distances = np.mean((ice_tile_locations - unit.pos) ** 2, 1)
+                            closest_ice_tile = ice_tile_locations[np.argmin(ice_tile_distances)]
+                            if np.all(closest_ice_tile == unit.pos):
+                                if unit.power >= unit.dig_cost(game_state) + unit.action_queue_cost(game_state):
+                                    actions[unit_id] = [unit.dig(repeat=0)]
+                            else:
+                                direction = direction_to(unit.pos, closest_ice_tile)
+                                move_cost = unit.move_cost(game_state, direction)
+                                if move_cost is not None and unit.power >= move_cost + unit.action_queue_cost(game_state):
+                                    actions[unit_id] = [unit.move(direction, repeat=0)]
+                        # else if we have enough ice, we go back to the factory and dump it.
+                        elif unit.cargo.ice >= 160:
+                            direction = direction_to(unit.pos, closest_factory_tile)
+                            if adjacent_to_factory:
+                                if unit.power >= unit.action_queue_cost(game_state):
+                                    actions[unit_id] = [unit.transfer(direction, 0, unit.cargo.ice, repeat=0)]
+                            else:
+                                move_cost = unit.move_cost(game_state, direction)
+                                if move_cost is not None and unit.power >= move_cost + unit.action_queue_cost(game_state):
+                                    actions[unit_id] = [unit.move(direction, repeat=0)]
+                # for light robots
                 else:
-                    # previous ice mining code
-                    if unit.cargo.ice < 160:
-                        ice_tile_distances = np.mean((ice_tile_locations - unit.pos) ** 2, 1)
-                        closest_ice_tile = ice_tile_locations[np.argmin(ice_tile_distances)]
-                        if np.all(closest_ice_tile == unit.pos):
-                            if unit.power >= unit.dig_cost(game_state) + unit.action_queue_cost(game_state):
-                                actions[unit_id] = [unit.dig(repeat=0)]
-                        else:
-                            direction = direction_to(unit.pos, closest_ice_tile)
-                            move_cost = unit.move_cost(game_state, direction)
-                            if move_cost is not None and unit.power >= move_cost + unit.action_queue_cost(game_state):
-                                actions[unit_id] = [unit.move(direction, repeat=0)]
-                    # else if we have enough ice, we go back to the factory and dump it.
-                    elif unit.cargo.ice >= 160:
-                        direction = direction_to(unit.pos, closest_factory_tile)
+                    if unit.power < 300:
                         if adjacent_to_factory:
-                            if unit.power >= unit.action_queue_cost(game_state):
-                                actions[unit_id] = [unit.transfer(direction, 0, unit.cargo.ice, repeat=0)]
+                            if factory_power >= 100:
+                                actions[unit_id] = [unit.pickup(4, 100, repeat=0)]
                         else:
+                            direction = direction_to(unit.pos, closest_factory_tile)
                             move_cost = unit.move_cost(game_state, direction)
                             if move_cost is not None and unit.power >= move_cost + unit.action_queue_cost(game_state):
                                 actions[unit_id] = [unit.move(direction, repeat=0)]
+                    else:
+                        if adjacent_to_rubble:
+                            if unit.power >= unit.dig_cost(game_state) + unit.action_queue_cost(game_state):
+                                    actions[unit_id] = [unit.dig(repeat=0)]
+                        else:
+                            direction = direction_to(unit.pos, closest_rubble_tile)
+                            move_cost = unit.move_cost(game_state, direction)
+                            if move_cost is not None and unit.power >= move_cost + unit.action_queue_cost(game_state):
+                                actions[unit_id] = [unit.move(direction, repeat=0)]
+
         return actions
