@@ -2,7 +2,6 @@ from lux.kit import obs_to_game_state, GameState, EnvConfig
 from lux.utils import direction_to, my_turn_to_place_factory
 import numpy as np
 import sys
-import luxai_s2.unit as luxai_unit
 
 class Agent():
     def __init__(self, player: str, env_cfg: EnvConfig) -> None:
@@ -79,7 +78,7 @@ class Agent():
         ice_map = game_state.board.ice
         rubble_map = game_state.board.rubble
         ice_tile_locations = np.argwhere(ice_map == 1)
-        rubble_tile_locations = np.argwhere(rubble_map != 1)
+        rubble_tile_locations = np.argwhere(rubble_map > 0)
         for unit_id, unit in units.items():
             closest_factory = None
             adjacent_to_factory = False
@@ -95,7 +94,7 @@ class Agent():
 
                 factory_power = closest_factory.power
                 # for heavy robots
-                if unit.unit_type == luxai_unit.UnitType.HEAVY:
+                if unit.unit_type == 'HEAVY':
                     # pickup power of factory
                     if adjacent_to_factory and factory_power >= 300:
                         if factory_power >= 300:
